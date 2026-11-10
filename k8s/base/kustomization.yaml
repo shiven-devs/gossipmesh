@@ -1,0 +1,23 @@
+# `kubectl apply -k k8s/` applies everything below in one command, and
+# Kustomize is built into kubectl - no extra tool to install.
+#
+# Order matters only for the namespace, which Kustomize applies first because
+# every other resource declares it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gossip
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - headless-service.yaml
+  - statefulset.yaml
+  - dashboard.yaml
+  - pdb.yaml
+
+labels:
+  - includeSelectors: false
+    pairs:
+      app.kubernetes.io/part-of: gossipmesh
+      app.kubernetes.io/managed-by: kustomize

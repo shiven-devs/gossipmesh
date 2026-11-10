@@ -1,0 +1,49 @@
+# Everything here is excluded from the build context, which does two things:
+# the build is faster (nothing useless is uploaded to the daemon), and the
+# image cannot accidentally ship source, notes or secrets it does not need.
+#
+# node_modules is the important one: the host's copy was installed on Windows
+# and may contain platform-specific binaries. The image installs its own with
+# `npm ci` inside Linux.
+node_modules
+npm-debug.log*
+
+# Git and CI
+.git
+.gitignore
+.github
+
+# Tests and tooling: a runtime image has no reason to carry them
+test
+eslint.config.js
+.nvmrc
+
+# The tutorial code is a reference, not part of the service
+legacy
+
+# Docs, notes and anything private
+docs
+prompts
+CLAUDE.md
+README.md
+results
+.claude
+
+# Local run artefacts
+logs
+*.log
+.env
+.env.*
+
+# Docker's own files
+Dockerfile
+dashboard.Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Editor / OS junk
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+desktop.ini

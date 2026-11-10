@@ -1,0 +1,8 @@
+# One namespace for everything, so the whole demo can be torn down with a
+# single delete and nothing leaks into default/.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gossip
+  labels:
+    app.kubernetes.io/name: gossipmesh

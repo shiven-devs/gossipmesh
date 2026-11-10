@@ -1,0 +1,49 @@
+# Line endings, decided by the repository rather than by whoever cloned it.
+#
+# Why this file exists even though every file here is already LF: git's
+# core.autocrlf is a per-machine setting, so the next clone - a different
+# laptop, a CI runner, a colleague with the Windows default of autocrlf=true -
+# can check these files out with CRLF. .gitattributes travels with the repo and
+# overrides that, which makes the line endings a property of the project.
+#
+# The one that genuinely breaks things is *.sh. A shell script checked out with
+# CRLF fails on Linux with a message that tells you nothing useful:
+#
+#   ./scripts/local-cluster.sh: /usr/bin/env: 'bash\r': No such file or directory
+#
+# ...because the \r is part of the interpreter name. Dockerfiles, YAML and
+# JavaScript tolerate CRLF, so they are pinned for consistency rather than
+# necessity.
+
+# Let git detect text files and normalise them to LF in the repository.
+* text=auto
+
+# Anything Linux executes or parses inside a container must be LF.
+*.sh            text eol=lf
+*.mjs           text eol=lf
+*.js            text eol=lf
+*.json          text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.md            text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+.dockerignore   text eol=lf
+.gitignore      text eol=lf
+.nvmrc          text eol=lf
+
+# Batch files are the one thing that genuinely wants CRLF.
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+
+# Never touched, never diffed as text.
+*.png           binary
+*.jpg           binary
+*.gif           binary
+*.ico           binary
+*.pdf           binary
+*.mp4           binary
+
+# Generated: collapsed in GitHub diffs and excluded from review noise. It is
+# still committed - `npm ci` depends on it - just not worth reading.
+package-lock.json linguist-generated=true

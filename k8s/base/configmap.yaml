@@ -1,0 +1,27 @@
+# Protocol tuning, separated from the StatefulSet on purpose: changing a
+# timeout is then a ConfigMap edit plus a rollout, not a change to the thing
+# that defines identity and storage.
+#
+# These values are NOT gossiped - each node reads its own copy. Two nodes with
+# different thresholds would both be correct, just differently patient.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gossip-config
+  namespace: gossip
+data:
+  GOSSIP_INTERVAL_MS: "1000"
+  FANOUT: "3"
+  REQUEST_TIMEOUT_MS: "500"
+  SUSPECT_MS: "5000"
+  DEAD_MS: "15000"
+  CLEANUP_MS: "60000"
+  RUMOR_ROUNDS: "10"
+  # Kubernetes sends SIGTERM and then SIGKILL after
+  # terminationGracePeriodSeconds. This must be comfortably inside that window
+  # or a node would be killed mid-goodbye and show up as a failure.
+  SHUTDOWN_TIMEOUT_MS: "3000"
+  # On for the demo: /chaos/partition and /chaos/crash are how the failure
+  # detector gets shown doing its job. Off in anything real.
+  CHAOS_ENABLED: "true"
+  LOG_LEVEL: "info"

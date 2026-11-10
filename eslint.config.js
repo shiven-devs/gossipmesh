@@ -30,6 +30,23 @@ const nodeGlobals = {
   clearImmediate: "readonly",
 };
 
+/**
+ * Browser globals, for the dashboard's static page. Only what it uses: the
+ * point of listing these by hand is that an unexpected global - say a stray
+ * `window.foo` - still gets caught.
+ */
+const browserGlobals = {
+  document: "readonly",
+  window: "readonly",
+  fetch: "readonly",
+  setTimeout: "readonly",
+  clearTimeout: "readonly",
+  setInterval: "readonly",
+  clearInterval: "readonly",
+  console: "readonly",
+  location: "readonly",
+};
+
 export default [
   {
     // legacy/ is the tutorial code kept as a reference. It is never linted or
@@ -37,7 +54,25 @@ export default [
     ignores: ["node_modules/**", "legacy/**", "coverage/**", "dist/**", "results/**"],
   },
   {
+    // The dashboard page runs in a browser, not in Node: different globals,
+    // so it gets its own block rather than loosening the rules everywhere.
+    files: ["dashboard/public/**/*.js"],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: "module",
+      globals: browserGlobals,
+    },
+    rules: {
+      "no-undef": "error",
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      eqeqeq: ["error", "always"],
+      "no-var": "error",
+      "prefer-const": "error",
+    },
+  },
+  {
     files: ["**/*.js"],
+    ignores: ["dashboard/public/**/*.js"],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: "module",

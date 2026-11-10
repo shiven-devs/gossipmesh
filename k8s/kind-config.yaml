@@ -1,0 +1,15 @@
+# A three-node kind cluster: one control plane, two workers.
+#
+# Two workers rather than one is the point: with a single node, "the pods are
+# spread across machines" is untestable, and a node-level failure cannot be
+# distinguished from a pod-level one. Each kind node is a container running
+# kubelet, so this fits on a laptop.
+#
+#   kind create cluster --name gossip --config k8s/kind-config.yaml
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: gossip
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker

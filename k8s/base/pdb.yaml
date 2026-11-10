@@ -1,0 +1,20 @@
+# A PodDisruptionBudget guards against VOLUNTARY disruption only: node drains,
+# cluster upgrades, `kubectl drain`. It does not (and cannot) stop a crash, a
+# SIGKILL or `kubectl delete pod` - those are involuntary, and handling them is
+# the failure detector's job.
+#
+# minAvailable 3 of 5 keeps a majority gossiping during a rolling node drain,
+# so the cluster never loses so many members at once that convergence stalls.
+# It is expressed as an absolute number rather than a percentage so that
+# scaling to 10 replicas does not silently make the budget stricter.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: gossip
+  namespace: gossip
+spec:
+  minAvailable: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gossipmesh
+      app.kubernetes.io/component: node

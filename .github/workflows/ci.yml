@@ -1,0 +1,224 @@
+# CI for GossipMesh.
+#
+# Four jobs, deliberately in this order of cost:
+#
+#   test    unit + integration tests and lint. Seconds. Catches most things.
+#   images  both container images actually build, and are pushed to GHCR from
+#           main only.
+#   e2e     a real Kubernetes cluster inside the runner (kind), the real
+#           manifests applied, and the cluster's own behaviour asserted:
+#           convergence, failure detection, restart, rumor spread.
+#   summary one place that is red if anything upstream is.
+#
+# The e2e job is the one that earns its keep. The unit tests prove the merge
+# rules on a fake clock; only a cluster can prove that five processes with
+# different clocks, real DNS and real timeouts converge - and that the probes
+# and manifests are right. It is also the job that would have caught the two
+# bugs Phase 7 found by hand: a readiness probe that could not fail, and a
+# partition that never healed.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only by default. The one job that needs more asks for it itself.
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the previous run: the old answer is
+# not interesting once the code has moved on.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_IMAGE: gossipmesh:ci
+  DASHBOARD_IMAGE: gossipmesh-dashboard:ci
+
+jobs:
+  test:
+    name: lint + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # From .nvmrc, so CI cannot drift from what is used locally or in
+          # the Dockerfile.
+          node-version-file: .nvmrc
+          cache: npm
+
+      # `npm ci` installs exactly the lockfile, and fails if package.json and
+      # the lock have diverged - which is itself a useful check.
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm test
+
+      # Production dependencies only: dev tooling never ships in the image, so
+      # a dev-only advisory must not be able to turn the pipeline red. (At the
+      # time of writing eslint pulls in a moderate minimatch advisory, and the
+      # "fix" is downgrading to an unsupported eslint.)
+      - name: audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  images:
+    name: container images
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: log in to GHCR
+        # Only when something will actually be pushed. A pull request from a
+        # fork has no write token, and asking for one would fail the job.
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build (and push from main) the node image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          # The commit sha is the only tag that is never ambiguous; :latest is
+          # a convenience for humans.
+          tags: |
+            ghcr.io/${{ github.repository }}/gossipmesh:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/gossipmesh:latest
+          build-args: |
+            APP_VERSION=${{ github.sha }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: build (and push from main) the dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./dashboard.Dockerfile
+          tags: |
+            ghcr.io/${{ github.repository }}/gossipmesh-dashboard:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/gossipmesh-dashboard:latest
+          build-args: |
+            APP_VERSION=${{ github.sha }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: report the image size
+        # A number worth watching per commit rather than measuring once.
+        run: |
+          docker build -q -t "$NODE_IMAGE" -f Dockerfile . >/dev/null
+          docker image inspect "$NODE_IMAGE" --format 'node image: {{.Size}} bytes' \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  e2e:
+    name: end-to-end on kind
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: create a kind cluster
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: gossip
+          config: k8s/kind-config.yaml
+
+      - name: build both images
+        run: |
+          docker build -t "$NODE_IMAGE" -f Dockerfile .
+          docker build -t "$DASHBOARD_IMAGE" -f dashboard.Dockerfile .
+
+      # Side-load into the cluster's nodes. No registry is involved, which is
+      # why this works identically on a laptop and on a runner.
+      - name: load the images into kind
+        run: kind load docker-image "$NODE_IMAGE" "$DASHBOARD_IMAGE" --name gossip
+
+      - name: show what will be applied
+        # The overlay retags the images to :ci, so a stale :dev on anyone's
+        # machine can never be what a green pipeline tested. Printing the
+        # resolved image lines makes that visible in the log.
+        run: |
+          kubectl kustomize k8s/ >/dev/null   # fail early if the base is broken
+          kubectl kustomize k8s/overlays/ci | grep -E '^\s+(image|replicas):'
+
+      - name: apply the CI overlay
+        run: kubectl apply -k k8s/overlays/ci
+
+      - name: wait for the cluster to be ready
+        run: |
+          kubectl -n gossip rollout status statefulset/gossip --timeout=180s
+          kubectl -n gossip rollout status deployment/dashboard --timeout=120s
+          kubectl -n gossip get pods -o wide
+
+      - name: report the image sizes
+        # Worth watching per commit rather than measuring once. These are the
+        # images the e2e job just tested, not a separate build.
+        run: |
+          {
+            echo "### Image sizes"
+            docker image inspect "$NODE_IMAGE" --format '- node: {{.Size}} bytes'
+            docker image inspect "$DASHBOARD_IMAGE" --format '- dashboard: {{.Size}} bytes'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: end-to-end checks
+        env:
+          NAMESPACE: gossip
+          EXPECT_NODES: "3"
+          TIMEOUT_MS: "60000"
+        run: node scripts/e2e-check.mjs
+
+      # Only on failure, and this is the difference between "e2e is flaky" and
+      # a diagnosis: the cluster is gone by the time anyone looks at the logs.
+      - name: dump everything on failure
+        if: failure()
+        run: |
+          echo "## e2e failed" >> "$GITHUB_STEP_SUMMARY"
+          kubectl -n gossip get all -o wide || true
+          kubectl -n gossip describe pods || true
+          kubectl -n gossip get events --sort-by=.lastTimestamp | tail -40 || true
+          for pod in $(kubectl -n gossip get pods -o name); do
+            echo "===== $pod ====="
+            kubectl -n gossip logs "$pod" --tail=80 --all-containers || true
+            kubectl -n gossip logs "$pod" --previous --tail=40 --all-containers 2>/dev/null || true
+          done
+
+  summary:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [test, images, e2e]
+    # Runs even when something failed, so the badge reflects the whole pipeline
+    # rather than just the last job that happened to finish.
+    if: always()
+    steps:
+      - name: fail if any job did not succeed
+        run: |
+          echo "test:   ${{ needs.test.result }}"
+          echo "images: ${{ needs.images.result }}"
+          echo "e2e:    ${{ needs.e2e.result }}"
+          [ "${{ needs.test.result }}" = "success" ] \
+            && [ "${{ needs.images.result }}" = "success" ] \
+            && [ "${{ needs.e2e.result }}" = "success" ]

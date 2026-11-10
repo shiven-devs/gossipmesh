@@ -1,0 +1,164 @@
+# A five-node GossipMesh cluster in containers: the step between
+# `npm run cluster:local` and Kubernetes.
+#
+# What changes compared to running five processes on the host:
+#   - every node listens on the SAME port (3000) and is reached by its service
+#     name, because each container has its own network namespace. That is also
+#     how it will work in Kubernetes, where the seeds are DNS names rather than
+#     localhost ports.
+#   - Compose provides DNS: `node1` resolves to node1's container. Seeds are
+#     therefore stable names and need no IP addresses anywhere.
+#   - `docker compose stop node3` sends a real SIGTERM, so the graceful leave
+#     runs - the thing that cannot be demonstrated on Windows directly.
+#
+# Try:
+#   docker compose up --build
+#   open http://localhost:8080             # the dashboard
+#   DASHBOARD_PORT=8088 docker compose up  # ...if 8080 is already taken
+#   curl localhost:3001/members            # node1's view
+#   docker compose stop node3              # graceful: peers show "left"
+#   docker compose start node3             # rejoins with a new generation
+#   docker compose kill -s SIGKILL node4   # crash: suspect -> dead, stays down
+#   docker compose start node4             # ...because `kill` counts as manual
+#   curl -X POST localhost:3004/chaos/crash  # an INTERNAL crash does restart
+#   curl -X POST localhost:3001/broadcast -H 'content-type: application/json' \
+#        -d '{"payload":{"msg":"hello"}}'
+
+name: gossipmesh
+
+# Shared settings.
+#
+# Only node1 carries the `build` section. Giving all five the same build and
+# the same image tag makes Compose build them in parallel and then race each
+# other exporting the image, which fails with
+#   target node5: failed to solve: image "gossipmesh:dev": already exists
+# One builder and four consumers of the finished tag is both correct and
+# faster: the image is built exactly once.
+x-gossip-node: &gossip-node
+  image: gossipmesh:dev
+  # These four do not build the image, so Compose would try to PULL
+  # gossipmesh:dev from a registry where it does not exist. `never` tells it to
+  # use the local tag that node1's build produces.
+  #
+  # `depends_on: [node1]` would also fix the pull, but it makes Compose tear
+  # the cluster down in dependency order, one service at a time: measured 9.1 s
+  # for `docker compose stop`, against 1.15 s when all five are stopped in
+  # parallel. Each node's own graceful leave takes ~15 ms either way, so the
+  # ordering was pure cost - and nothing here needs ordering anyway, since a
+  # node whose seeds are not up yet simply retries next round.
+  pull_policy: never
+  networks: [gossip]
+  # A container that exits on its own - a bug, or /chaos/crash - is brought
+  # back by Docker, which is the closest Compose gets to a Kubernetes
+  # controller: verified restartCount 0 -> 1 and the node alive again ~1.5 s
+  # after /chaos/crash.
+  #
+  # Worth knowing before the demo: `docker stop` AND `docker kill` both count
+  # as manual stops, so neither triggers this policy (verified: exit code 137,
+  # restartCount 0, container stays down until `docker compose start`). Only
+  # Kubernetes restarts a pod you deleted - Compose will not.
+  restart: unless-stopped
+  # Docker's default is 10s. The node announces its departure and exits in
+  # well under a second, but leaving headroom means a slow farewell round is
+  # never cut off mid-sentence by SIGKILL.
+  stop_grace_period: 10s
+
+x-gossip-env: &gossip-env
+  PORT: 3000
+  # Two fixed seeds are enough: every other member is learned by gossip.
+  SEEDS: node1:3000,node2:3000
+  GOSSIP_INTERVAL_MS: 1000
+  FANOUT: 3
+  SUSPECT_MS: 5000
+  DEAD_MS: 15000
+  CLEANUP_MS: 60000
+  RUMOR_ROUNDS: 10
+  # On in this dev cluster so the partition and crash demos work. The image
+  # defaults to off, and the Kubernetes manifests (Phase 7) decide separately.
+  CHAOS_ENABLED: "true"
+  LOG_LEVEL: info
+
+services:
+  node1:
+    <<: *gossip-node
+    # The one service that builds the image; the others just run the tag.
+    build:
+      context: .
+      args:
+        APP_VERSION: 0.1.0-compose
+    container_name: gossip-node1
+    environment:
+      <<: *gossip-env
+      # HOST is what this node advertises to others, so it must be the name
+      # peers can resolve - the service name, not localhost.
+      HOST: node1
+      NODE_ID: node1
+    # Published only so you can curl from the host; nodes never use these.
+    ports: ["3001:3000"]
+
+  node2:
+    <<: *gossip-node
+    container_name: gossip-node2
+    environment:
+      <<: *gossip-env
+      HOST: node2
+      NODE_ID: node2
+    ports: ["3002:3000"]
+
+  node3:
+    <<: *gossip-node
+    container_name: gossip-node3
+    environment:
+      <<: *gossip-env
+      HOST: node3
+      NODE_ID: node3
+    ports: ["3003:3000"]
+
+  node4:
+    <<: *gossip-node
+    container_name: gossip-node4
+    environment:
+      <<: *gossip-env
+      HOST: node4
+      NODE_ID: node4
+    ports: ["3004:3000"]
+
+  node5:
+    <<: *gossip-node
+    container_name: gossip-node5
+    environment:
+      <<: *gossip-env
+      HOST: node5
+      NODE_ID: node5
+    ports: ["3005:3000"]
+
+  # The dashboard only reads. It is not a seed, no node knows it exists, and
+  # the cluster behaves identically whether it is running or not - which is
+  # exactly why it can be restarted or redeployed on its own.
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard.Dockerfile
+      args:
+        APP_VERSION: 0.1.0-compose
+    image: gossipmesh-dashboard:dev
+    container_name: gossip-dashboard
+    networks: [gossip]
+    restart: unless-stopped
+    stop_grace_period: 5s
+    environment:
+      PORT: 8080
+      # Container-internal addresses: the dashboard polls nodes by service
+      # name on port 3000, exactly as the nodes reach each other.
+      NODES: node1:3000,node2:3000,node3:3000,node4:3000,node5:3000
+      POLL_INTERVAL_MS: 1000
+      REQUEST_TIMEOUT_MS: 700
+      LOG_LEVEL: info
+    # Overridable, because 8080 is a popular port on a developer machine (a
+    # stray Java process had it here). Only the HOST side moves; inside the
+    # network the dashboard is always :8080.
+    ports: ["${DASHBOARD_PORT:-8080}:8080"]
+
+networks:
+  gossip:
+    driver: bridge

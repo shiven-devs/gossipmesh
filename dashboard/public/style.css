@@ -1,0 +1,310 @@
+/*
+ * One stylesheet, no framework, no build step: the dashboard is served as
+ * three static files by the aggregator itself.
+ *
+ * The status colours are the whole point of the page, so they are defined once
+ * here as tokens and reused by the matrix, the legend and the tiles.
+ */
+
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1f232c;
+  --line: #2a2f3a;
+  --text: #e6e8ec;
+  --muted: #9aa2b1;
+
+  --alive: #2ea043;
+  --suspect: #d29922;
+  --dead: #da3633;
+  --left: #6e7681;
+  --buried: #3d2f4f;
+  --unknown: #232834;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 24px 16px 48px;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header,
+section,
+footer {
+  max-width: 1100px;
+  margin: 0 auto 28px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.3px;
+}
+
+h2 {
+  margin: 0 0 4px;
+  font-size: 15px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.sub,
+.hint {
+  margin: 6px 0 12px;
+  color: var(--muted);
+  max-width: 70ch;
+}
+
+.hint {
+  font-size: 13px;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.pill.live {
+  color: var(--alive);
+  border-color: color-mix(in srgb, var(--alive) 50%, var(--line));
+}
+
+.pill.broken {
+  color: var(--dead);
+  border-color: color-mix(in srgb, var(--dead) 50%, var(--line));
+}
+
+button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--muted);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* --- summary tiles --- */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.tile {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.tile .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.tile .value {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+.tile.warn .value {
+  color: var(--suspect);
+}
+
+.tile.bad .value {
+  color: var(--dead);
+}
+
+.tile.good .value {
+  color: var(--alive);
+}
+
+/* --- legend --- */
+
+.legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid rgb(255 255 255 / 12%);
+}
+
+/* --- matrix --- */
+
+.matrix-wrap {
+  overflow-x: auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+}
+
+table.matrix {
+  border-collapse: separate;
+  border-spacing: 4px;
+}
+
+table.matrix th {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: left;
+  white-space: nowrap;
+  padding: 0 6px;
+}
+
+table.matrix th.col {
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+table.matrix td {
+  width: 44px;
+  height: 30px;
+  border-radius: 5px;
+  text-align: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgb(0 0 0 / 65%);
+  background: var(--unknown);
+}
+
+td.alive { background: var(--alive); }
+td.suspect { background: var(--suspect); }
+td.dead { background: var(--dead); color: rgb(255 255 255 / 85%); }
+td.left { background: var(--left); color: rgb(255 255 255 / 85%); }
+td.buried { background: var(--buried); color: rgb(255 255 255 / 70%); }
+td.unknown { background: var(--unknown); color: var(--muted); }
+
+/* A node's view of itself: the one cell it writes rather than learns. */
+td.self {
+  outline: 2px solid rgb(255 255 255 / 45%);
+  outline-offset: -2px;
+}
+
+tr.stale th,
+tr.stale td {
+  opacity: 0.4;
+}
+
+tr.stale th.observer::after {
+  content: " (unreachable)";
+  color: var(--dead);
+  font-size: 11px;
+}
+
+/* --- rumors --- */
+
+.rumors {
+  display: grid;
+  gap: 10px;
+}
+
+.rumor {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.rumor .top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.rumor code {
+  background: var(--panel-2);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.rumor .meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bar {
+  display: flex;
+  gap: 3px;
+  margin-top: 10px;
+}
+
+.bar .seg {
+  flex: 1;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--unknown);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.bar .seg.has {
+  background: var(--alive);
+  color: rgb(0 0 0 / 70%);
+}
+
+.empty {
+  color: var(--muted);
+  padding: 14px;
+  background: var(--panel);
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
+footer {
+  color: var(--muted);
+  font-size: 12px;
+}

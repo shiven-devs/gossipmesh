@@ -1,0 +1,34 @@
+# A headless Service: `clusterIP: None` means Kubernetes allocates no virtual
+# IP and does no load balancing. It exists purely to publish DNS.
+#
+# That is exactly what a gossip cluster needs. A normal Service would hand out
+# one IP and spread connections across pods at random - useless when the whole
+# point is to address a SPECIFIC peer. Headless gives us both:
+#
+#   gossip-headless.gossip.svc.cluster.local        -> one A record per pod
+#   gossip-0.gossip-headless.gossip.svc.cluster...  -> that pod, stably
+#
+# The first is how a new pod finds the cluster (SEED_DNS); the second is how
+# each pod advertises itself, and it survives restarts and rescheduling.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gossip-headless
+  namespace: gossip
+  labels:
+    app.kubernetes.io/name: gossipmesh
+spec:
+  clusterIP: None
+  # The critical flag. By default a Service only publishes DNS for pods that
+  # are READY - but a GossipMesh pod only becomes ready after it has exchanged
+  # gossip with a peer, and it can only do that if someone can resolve it.
+  # Without this the cluster deadlocks on first boot: nobody is ready, so
+  # nobody is in DNS, so nobody can become ready.
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: gossipmesh
+    app.kubernetes.io/component: node
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http

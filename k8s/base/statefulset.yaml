@@ -1,0 +1,164 @@
+# The cluster itself.
+#
+# StatefulSet, not Deployment. A Deployment's pods get random names
+# (gossip-7d4f9-x2k1p) and a new name on every restart, which breaks two things
+# here at once: a restarted node would look like a brand new member rather than
+# the same one restarted, and no fixed address could ever be a seed. A
+# StatefulSet gives stable ordinal names (gossip-0 .. gossip-4) and, with the
+# headless Service, a stable DNS name per pod that survives rescheduling onto a
+# different machine.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: gossip
+  namespace: gossip
+  labels:
+    app.kubernetes.io/name: gossipmesh
+    app.kubernetes.io/component: node
+spec:
+  serviceName: gossip-headless
+  replicas: 5
+
+  # Default is OrderedReady: pod N is only created once pod N-1 is READY. For
+  # this cluster that is a deadlock - gossip-0 cannot become ready until it has
+  # exchanged gossip with a peer, and no peer will ever be created. Parallel
+  # starts all five at once, which is also how a real cluster boots.
+  podManagementPolicy: Parallel
+
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: gossipmesh
+      app.kubernetes.io/component: node
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: gossipmesh
+        app.kubernetes.io/component: node
+    spec:
+      # SIGTERM -> announce "left" -> one last gossip round -> exit. The node
+      # finishes in well under a second; this leaves room for a slow farewell
+      # round, and it is the budget SHUTDOWN_TIMEOUT_MS has to stay inside.
+      terminationGracePeriodSeconds: 20
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+
+      # Spread pods across the two workers where possible, so one worker dying
+      # cannot take the whole cluster. ScheduleAnyway, not DoNotSchedule: with
+      # 10 replicas on 2 workers a hard constraint would leave pods Pending.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: gossipmesh
+              app.kubernetes.io/component: node
+
+      containers:
+        - name: gossip
+          image: gossipmesh:dev
+          # The image is side-loaded with `kind load docker-image`, so there is
+          # no registry to pull from. Never would also work; IfNotPresent keeps
+          # the manifest usable once the image IS in a registry (Phase 8).
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: http
+              containerPort: 3000
+
+          env:
+            # Downward API: the pod learns its own identity from Kubernetes
+            # rather than having it baked in, which is what lets one image and
+            # one manifest serve every replica.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+            # The node id IS the pod name: gossip-2 restarts as gossip-2, so
+            # peers can tell "the member I knew, restarted" from "a new member".
+            - name: NODE_ID
+              value: $(POD_NAME)
+
+            # What this pod advertises to peers. It must be the per-pod DNS name
+            # from the headless Service - a name that still resolves after the
+            # pod is rescheduled onto another worker with a different IP.
+            - name: HOST
+              value: $(POD_NAME).gossip-headless.$(NAMESPACE).svc.cluster.local
+            - name: PORT
+              value: "3000"
+
+            # Bootstrap by resolving the headless Service, which returns an A
+            # record per pod. A fixed seed list would leave a pod created by
+            # `kubectl scale` unable to find anyone if the named seeds were the
+            # ones that happened to be down.
+            - name: SEED_DNS
+              value: gossip-headless.$(NAMESPACE).svc.cluster.local
+            - name: APP_VERSION
+              value: 0.1.0-k8s
+
+          envFrom:
+            - configMapRef:
+                name: gossip-config
+
+          # Liveness: "is this process broken?" /health deliberately ignores
+          # the cluster. If it reported peers instead, a network partition
+          # would make Kubernetes restart every pod on both sides and turn a
+          # network problem into an outage.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            # Generous on purpose: a node under a GC pause or a slow round is
+            # not broken, and restarting it would lose its generation for no
+            # reason.
+            failureThreshold: 6
+
+          # Readiness: "has this node actually met the cluster?" It flips to
+          # ready after one successful exchange. Unready is not a failure -
+          # Kubernetes simply waits, which is right for a node still joining.
+          # publishNotReadyAddresses on the Service is what stops this from
+          # deadlocking at boot.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+
+          resources:
+            # Requests are what the scheduler reserves; limits are the ceiling.
+            # A gossip node is tiny - a few HTTP requests per second - so small
+            # numbers here let 10 replicas fit on a laptop's kind cluster.
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              # No CPU limit on purpose: CPU throttling would stall the gossip
+              # loop and make a healthy node look silent to its peers, which is
+              # exactly the false positive the failure detector should not see.
+              memory: 192Mi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

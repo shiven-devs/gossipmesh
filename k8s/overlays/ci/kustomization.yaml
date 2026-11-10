@@ -1,0 +1,70 @@
+# CI overlay: the same manifests, impatient.
+#
+# A Kustomize overlay rather than a second copy of everything - the base and CI
+# must not be able to drift apart, or a green CI run stops meaning anything
+# about what gets deployed.
+#
+# Two changes, both about time:
+#   - 3 replicas instead of 5. Convergence is what is being tested, not scale,
+#     and a GitHub runner has 2 CPUs.
+#   - thresholds scaled down by ~5x, keeping the RATIOS from the base
+#     (SUSPECT = 5 rounds, DEAD = 15 rounds). The protocol is unchanged; the
+#     job just finishes in seconds instead of minutes.
+#
+#   kubectl apply -k k8s/overlays/ci
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: gossip
+
+resources:
+  - ../../base
+
+replicas:
+  - name: gossip
+    count: 3
+
+# CI builds :ci, never :dev. A stale gossipmesh:dev on a developer machine can
+# then never be the thing a green pipeline tested.
+images:
+  - name: gossipmesh
+    newTag: ci
+  - name: gossipmesh-dashboard
+    newTag: ci
+
+# A merge patch, so the keys not mentioned here keep the base's values.
+patches:
+  - target:
+      kind: ConfigMap
+      name: gossip-config
+    patch: |-
+      - op: replace
+        path: /data/GOSSIP_INTERVAL_MS
+        value: "200"
+      - op: replace
+        path: /data/REQUEST_TIMEOUT_MS
+        value: "150"
+      - op: replace
+        path: /data/SUSPECT_MS
+        value: "1000"
+      - op: replace
+        path: /data/DEAD_MS
+        value: "3000"
+      - op: replace
+        path: /data/CLEANUP_MS
+        value: "10000"
+      - op: replace
+        path: /data/RUMOR_ROUNDS
+        value: "8"
+      - op: replace
+        path: /data/LOG_LEVEL
+        value: "debug"
+  # minAvailable 3 of 5 cannot be satisfied by 3 replicas, which would block
+  # any voluntary disruption in the CI cluster.
+  - target:
+      kind: PodDisruptionBudget
+      name: gossip
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 2

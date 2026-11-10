@@ -1,0 +1,15 @@
+# The default target: `kubectl apply -k k8s/` deploys the base, unchanged.
+#
+# The indirection exists because Kustomize refuses to build an overlay that
+# lives inside the root it references ("cycle detected"), which is what a flat
+# k8s/ directory with an overlays/ subdirectory produces. base/ holds the
+# manifests, overlays/ hold variants, and this file keeps the short command
+# working:
+#
+#   kubectl apply -k k8s/                # the real thing: 5 nodes
+#   kubectl apply -k k8s/overlays/ci     # CI: 3 nodes, impatient timings
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - base

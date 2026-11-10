@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GossipMesh</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>GossipMesh</h1>
+      <p class="sub">
+        Every node's own view of the cluster. Rows disagree while news is still
+        spreading &mdash; that is eventual consistency, not a bug.
+      </p>
+      <div class="status">
+        <span id="poll-state" class="pill">connecting&hellip;</span>
+        <button id="broadcast" type="button">Broadcast a rumor</button>
+      </div>
+    </header>
+
+    <section class="tiles" id="tiles"></section>
+
+    <section>
+      <h2>Membership matrix</h2>
+      <p class="hint">
+        Row = the node doing the looking. Column = the member being looked at.
+        A cell is that row's private opinion, which is never gossiped.
+      </p>
+      <div class="legend" id="legend"></div>
+      <div class="matrix-wrap">
+        <table class="matrix" id="matrix">
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Rumor spread</h2>
+      <p class="hint">
+        Spread time is measured by this dashboard's single clock, from when it
+        first saw one node holding a rumor to when it saw the last. It can
+        never be finer than the poll interval, and it is not a benchmark.
+      </p>
+      <div id="rumors" class="rumors"></div>
+    </section>
+
+    <footer>
+      <span id="footer-note"></span>
+    </footer>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
