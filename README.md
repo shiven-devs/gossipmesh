@@ -1,6 +1,6 @@
 # GossipMesh
 
-[![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)](https://github.com/OWNER/REPO/actions/workflows/ci.yml)
+[![CI](https://github.com/shiven-devs/gossipmesh/actions/workflows/ci.yml/badge.svg)](https://github.com/shiven-devs/gossipmesh/actions/workflows/ci.yml)
 
 A decentralized cluster-membership and failure-detection service built on a
 push-pull gossip protocol, deployed with Docker and Kubernetes.
@@ -9,10 +9,8 @@ Nodes find each other with no central registry, decide for themselves when a
 peer has stopped, announce their own departure when asked to shut down, and
 spread a message to the whole cluster in a few rounds.
 
-> The badge above is a placeholder until the repo is pushed: replace
-> `OWNER/REPO` with your GitHub path (for example `shiven/gossipmesh`) and the
-> badge starts reporting the real pipeline. The full README, diagram and demo
-> are Phase 10; this file is the working reference until then.
+> Work in progress: the full README, architecture diagram and demo are Phase 10;
+> this file is the working reference until then.
 
 ## Quickstart
 
