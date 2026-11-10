@@ -1,0 +1,5 @@
+{
+  "node_config": {
+    "seed_nodes": ["localhost:3001", "localhost:3002"]
+  }
+}

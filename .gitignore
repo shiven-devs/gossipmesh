@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+package-lock.json.bak
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Benchmark output (real numbers get committed by hand, raw runs don't)
+results/raw/
+*.tmp.csv
+
+# Build / coverage
+coverage/
+dist/
+.nyc_output/
+
+# Editor / OS junk
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+
+CLAUDE.md
+prompts/
+docs/PLAN.md
+.claude/
